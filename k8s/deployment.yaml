@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: aorax-deployment
+  labels:
+    app: aorax
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: aorax
+
+  template:
+    metadata:
+      labels:
+        app: aorax
+
+    spec:
+      containers:
+      - name: aorax
+
+        image: aorax-api:latest
+
+        imagePullPolicy: Never
+
+        ports:
+        - containerPort: 5000
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          failureThreshold: 30
+          periodSeconds: 10
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

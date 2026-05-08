@@ -1,0 +1,186 @@
+name: Build and Deploy to Kubernetes
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: your-dockerhub-username/aorax
+  KUBE_NAMESPACE: aorax-production
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.DOCKER_IMAGE }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
+        cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+    
+    - name: Image digest
+      run: echo ${{ steps.meta.outputs.digest }}
+
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v4
+      with:
+        version: 'latest'
+    
+    - name: Configure kubectl
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+    
+    - name: Verify kubectl connection
+      run: |
+        kubectl cluster-info
+        kubectl get nodes
+    
+    - name: Create namespace if not exists
+      run: |
+        kubectl apply -f k8s/namespace.yaml
+    
+    - name: Apply ConfigMap
+      run: |
+        kubectl apply -f k8s/configmap.yaml
+    
+    - name: Apply Secrets
+      run: |
+        # Note: Secrets should be managed separately or through CI/CD secrets
+        # This is a placeholder - in production, use proper secret management
+        if [ -f k8s/secret.yaml ]; then
+          kubectl apply -f k8s/secret.yaml
+        else
+          echo "Warning: secret.yaml not found. Ensure secrets are configured in the cluster."
+        fi
+    
+    - name: Deploy application
+      run: |
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+    
+    - name: Apply HPA
+      run: |
+        kubectl apply -f k8s/hpa.yaml
+    
+    - name: Apply Ingress (if available)
+      run: |
+        if [ -f k8s/ingress.yaml ]; then
+          kubectl apply -f k8s/ingress.yaml
+        fi
+    
+    - name: Wait for rollout to complete
+      run: |
+        kubectl rollout status deployment/aorax-deployment -n ${{ env.KUBE_NAMESPACE }} --timeout=5m
+    
+    - name: Get deployment status
+      run: |
+        kubectl get all -n ${{ env.KUBE_NAMESPACE }}
+        kubectl get pods -n ${{ env.KUBE_NAMESPACE }}
+        kubectl get services -n ${{ env.KUBE_NAMESPACE }}
+    
+    - name: Get service URL
+      run: |
+        echo "Service Status:"
+        kubectl get service aorax-service -n ${{ env.KUBE_NAMESPACE }}
+        
+        # Get LoadBalancer IP if available
+        EXTERNAL_IP=$(kubectl get service aorax-service -n ${{ env.KUBE_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        if [ -n "$EXTERNAL_IP" ]; then
+          echo "Application is accessible at: http://$EXTERNAL_IP"
+        else
+          echo "LoadBalancer IP not yet assigned. Check service status."
+        fi
+    
+    - name: Deployment summary
+      if: always()
+      run: |
+        echo "=== Deployment Summary ==="
+        echo "Namespace: ${{ env.KUBE_NAMESPACE }}"
+        echo "Image: ${{ env.DOCKER_IMAGE }}:latest"
+        echo "=========================="
+        kubectl describe deployment aorax-deployment -n ${{ env.KUBE_NAMESPACE }} || true
+
+  test:
+    name: Test Deployment
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v4
+      with:
+        version: 'latest'
+    
+    - name: Configure kubectl
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+    
+    - name: Test health endpoint
+      run: |
+        # Wait for service to be ready
+        sleep 30
+        
+        # Get service IP
+        SERVICE_IP=$(kubectl get service aorax-service -n ${{ env.KUBE_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        if [ -n "$SERVICE_IP" ]; then
+          echo "Testing health endpoint at http://$SERVICE_IP/health"
+          curl -f http://$SERVICE_IP/health || echo "Health check failed or service not yet ready"
+        else
+          echo "Service IP not yet assigned. Skipping health check."
+        fi
+    
+    - name: Check pod logs
+      if: always()
+      run: |
+        echo "=== Recent Pod Logs ==="
+        kubectl logs -l app=aorax -n ${{ env.KUBE_NAMESPACE }} --tail=50 || echo "Could not fetch logs"
