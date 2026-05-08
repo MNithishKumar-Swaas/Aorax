@@ -89,15 +89,20 @@ jobs:
       run: |
         kubectl apply -f k8s/configmap.yaml
     
-    - name: Apply Secrets
+    - name: Create Kubernetes Secret from GitHub Secrets
       run: |
-        # Note: Secrets should be managed separately or through CI/CD secrets
-        # This is a placeholder - in production, use proper secret management
-        if [ -f k8s/secret.yaml ]; then
-          kubectl apply -f k8s/secret.yaml
-        else
-          echo "Warning: secret.yaml not found. Ensure secrets are configured in the cluster."
-        fi
+        kubectl create secret generic aorax-secret \
+          --from-literal=PORT="${{ secrets.PORT }}" \
+          --from-literal=NODE_ENV="${{ secrets.NODE_ENV }}" \
+          --from-literal=DB_HOST="${{ secrets.DB_HOST }}" \
+          --from-literal=DB_USER="${{ secrets.DB_USER }}" \
+          --from-literal=DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+          --from-literal=DB_NAME="${{ secrets.DB_NAME }}" \
+          --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+          --from-literal=JWT_EXPIRES_IN="${{ secrets.JWT_EXPIRES_IN }}" \
+          --from-literal=ENCRYPTION_KEY="${{ secrets.ENCRYPTION_KEY }}" \
+          --namespace=${{ env.KUBE_NAMESPACE }} \
+          --dry-run=client -o yaml | kubectl apply -f -
     
     - name: Deploy application
       run: |
