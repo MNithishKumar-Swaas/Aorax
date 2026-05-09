@@ -12,6 +12,7 @@ on:
 env:
   DOCKER_IMAGE: your-dockerhub-username/aorax
   KUBE_NAMESPACE: aorax-production
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
