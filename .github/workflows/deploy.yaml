@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: your-dockerhub-username/aorax
+  DOCKER_IMAGE: mnithishkumar23/aorax
   KUBE_NAMESPACE: aorax-production
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
