@@ -56,3 +56,4 @@ CREATE TABLE test_user (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+ 
